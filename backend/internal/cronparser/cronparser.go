@@ -326,7 +326,6 @@ func (c *CronExpression) matches(t time.Time) bool {
 	second := t.Second()
 	minute := t.Minute()
 	hour := t.Hour()
-	day := t.Day()
 	month := int(t.Month())
 	weekday := int(t.Weekday())
 	year := t.Year()
