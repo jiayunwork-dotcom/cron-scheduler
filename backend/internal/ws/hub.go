@@ -100,7 +100,7 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 
 		case msg := <-h.broadcast:
-			h.mu.RLock()
+			h.mu.Lock()
 			if subs, ok := h.taskSubs[msg.TaskName]; ok {
 				data, _ := json.Marshal(msg)
 				for client := range subs {
@@ -110,15 +110,15 @@ func (h *Hub) Run() {
 						close(client.send)
 						delete(subs, client)
 						if len(subs) == 0 {
-							delete(h.taskSubs, taskName)
+							delete(h.taskSubs, msg.TaskName)
 						}
 					}
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 
 		case <-ticker.C:
-			h.mu.RLock()
+			h.mu.Lock()
 			heartbeat := ServerMessage{
 				Type:      MessageTypeHeartbeat,
 				Timestamp: time.Now().Unix(),
@@ -132,7 +132,7 @@ func (h *Hub) Run() {
 					delete(h.clients, client)
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 		}
 	}
 }
