@@ -68,7 +68,9 @@ func SetupRouter(handler *Handler) *gin.Engine {
 		api.GET("/dag", handler.GetDAGHandler)
 
 		api.GET("/executions", handler.ListExecutionsHandler)
+		api.GET("/executions/history", handler.GetExecutionHistoryHandler)
 		api.GET("/executions/:id", handler.GetExecutionHandler)
+		api.GET("/executions/:id/detail", handler.GetExecutionDetailHandler)
 
 		api.GET("/alerts", handler.ListAlertsHandler)
 
@@ -1161,6 +1163,99 @@ func (h *Handler) ListRunningExecutionsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    items,
+		"message": "ok",
+	})
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+func (h *Handler) GetExecutionHistoryHandler(c *gin.Context) {
+	execs, err := h.repo.GetRecentCompletedExecutions(50)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	items := make([]models.ExecutionResponse, 0, len(execs))
+	for i := range execs {
+		items = append(items, models.ExecutionResponse{
+			ID:           execs[i].ID,
+			TaskID:       execs[i].TaskID,
+			TaskName:     execs[i].TaskName,
+			TriggerType:  execs[i].TriggerType,
+			TriggerTime:  execs[i].TriggerTime,
+			StartTime:    execs[i].StartTime,
+			EndTime:      execs[i].EndTime,
+			DurationMs:   execs[i].DurationMs,
+			Status:       execs[i].Status,
+			ExitCode:     execs[i].ExitCode,
+			Stdout:       truncateString(execs[i].Stdout, 500),
+			Stderr:       truncateString(execs[i].Stderr, 500),
+			RetryCount:   execs[i].RetryCount,
+			ErrorMessage: execs[i].ErrorMessage,
+			CreatedAt:    execs[i].CreatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    items,
+		"message": "ok",
+	})
+}
+
+func (h *Handler) GetExecutionDetailHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": "无效的执行记录ID",
+		})
+		return
+	}
+
+	exec, err := h.repo.GetExecution(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	resp := models.ExecutionResponse{
+		ID:           exec.ID,
+		TaskID:       exec.TaskID,
+		TaskName:     exec.TaskName,
+		TriggerType:  exec.TriggerType,
+		TriggerTime:  exec.TriggerTime,
+		StartTime:    exec.StartTime,
+		EndTime:      exec.EndTime,
+		DurationMs:   exec.DurationMs,
+		Status:       exec.Status,
+		ExitCode:     exec.ExitCode,
+		Stdout:       exec.Stdout,
+		Stderr:       exec.Stderr,
+		RetryCount:   exec.RetryCount,
+		ErrorMessage: exec.ErrorMessage,
+		CreatedAt:    exec.CreatedAt,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    resp,
 		"message": "ok",
 	})
 }

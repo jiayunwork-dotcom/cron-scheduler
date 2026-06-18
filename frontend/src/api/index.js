@@ -113,3 +113,11 @@ export const testWebhook = (webhookUrl) => {
 export const getRunningExecutions = () => {
   return request.get('/executions/running')
 }
+
+export const getExecutionHistory = () => {
+  return request.get('/executions/history')
+}
+
+export const getExecutionDetail = (id) => {
+  return request.get(`/executions/${id}/detail`)
+}

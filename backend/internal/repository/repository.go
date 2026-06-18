@@ -389,3 +389,17 @@ func (r *Repository) MissedExecutionExists(taskID uuid.UUID, scheduledTime time.
 	}
 	return count > 0, nil
 }
+
+func (r *Repository) GetRecentCompletedExecutions(limit int) ([]models.ExecutionHistory, error) {
+	var execs []models.ExecutionHistory
+	if limit <= 0 {
+		limit = 50
+	}
+	if err := r.db.Where("status != ?", models.StatusRunning).
+		Order("end_time DESC NULLS LAST, trigger_time DESC").
+		Limit(limit).
+		Find(&execs).Error; err != nil {
+		return nil, fmt.Errorf("获取最近完成执行记录失败: %w", err)
+	}
+	return execs, nil
+}
