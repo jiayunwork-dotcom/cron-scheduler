@@ -6,7 +6,7 @@
       </div>
       <div class="header-right">
         <el-button type="primary" @click="openHistoryDrawer">
-          <el-icon><History /></el-icon>
+          <el-icon><Clock /></el-icon>
           <span>历史回放</span>
         </el-button>
       </div>
@@ -153,7 +153,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
-import { History, Refresh } from '@element-plus/icons-vue'
+import { Clock, Refresh } from '@element-plus/icons-vue'
 import { getRunningExecutions, getExecutionHistory, getExecutionDetail } from '../api'
 
 const runningTasks = ref([])
