@@ -31,6 +31,11 @@ const routes = [
     component: () => import('../views/ExecutionHistory.vue')
   },
   {
+    path: '/monitor',
+    name: 'RealtimeMonitor',
+    component: () => import('../views/RealtimeMonitor.vue')
+  },
+  {
     path: '/settings',
     name: 'SystemSettings',
     component: () => import('../views/SystemSettings.vue')

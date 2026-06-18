@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"cron-scheduler/internal/alerter"
@@ -8,7 +9,9 @@ import (
 	"cron-scheduler/internal/models"
 	"cron-scheduler/internal/redis"
 	"cron-scheduler/internal/repository"
+	"cron-scheduler/internal/ws"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -22,6 +25,7 @@ type Scheduler struct {
 	repo           *repository.Repository
 	redisClient    *redis.RedisClient
 	alerter        *alerter.Alerter
+	wsHub          *ws.Hub
 	maxConcurrent  int
 	running        bool
 	stopCh         chan struct{}
@@ -31,7 +35,7 @@ type Scheduler struct {
 	lastTriggerMu  sync.Mutex
 }
 
-func NewScheduler(repo *repository.Repository, rc *redis.RedisClient, al *alerter.Alerter, maxConcurrent int) *Scheduler {
+func NewScheduler(repo *repository.Repository, rc *redis.RedisClient, al *alerter.Alerter, maxConcurrent int, wsHub *ws.Hub) *Scheduler {
 	if maxConcurrent <= 0 {
 		maxConcurrent = 5
 	}
@@ -39,6 +43,7 @@ func NewScheduler(repo *repository.Repository, rc *redis.RedisClient, al *alerte
 		repo:          repo,
 		redisClient:   rc,
 		alerter:       al,
+		wsHub:         wsHub,
 		maxConcurrent: maxConcurrent,
 		stopCh:        make(chan struct{}),
 		lastTrigger:   make(map[string]time.Time),
@@ -308,11 +313,14 @@ func (s *Scheduler) executeTask(taskID string) {
 	defer s.redisClient.RunningTaskRemove(taskID)
 
 	now := time.Now()
+	oldStatus := exec.Status
 	exec.Status = models.StatusRunning
 	exec.StartTime = &now
 	if err := s.repo.UpdateExecution(exec); err != nil {
 		return
 	}
+
+	s.wsHub.BroadcastStatus(task.Name, exec.ID.String(), oldStatus, exec.Status)
 
 	task.LastRunAt = &now
 	_ = s.repo.UpdateTask(task)
@@ -352,11 +360,15 @@ func (s *Scheduler) executeTask(taskID string) {
 		exec.ExitCode = &code
 	}
 
+	s.wsHub.BroadcastStatus(task.Name, exec.ID.String(), models.StatusRunning, exec.Status)
+
 	if exec.Status == models.StatusSuccess {
 		s.alerter.OnTaskSuccess(task.Name)
 	}
 
 	_ = s.repo.UpdateExecution(exec)
+
+	s.wsHub.UnsubscribeAll(task.Name)
 
 	shouldRetry := (exec.Status == models.StatusFailed || exec.Status == models.StatusTimeout) && exec.RetryCount < task.MaxRetries
 	shouldAlert := (exec.Status == models.StatusFailed || exec.Status == models.StatusTimeout) && !alertSent
@@ -446,11 +458,31 @@ func (s *Scheduler) runCommandWithKillStrategy(task *models.Task, shellName, she
 
 	cmd := exec.CommandContext(ctx, shellName, shellArg, task.Command)
 
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return -1, "", "", false, err, false
+	}
 
-	err = cmd.Run()
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return -1, "", "", false, err, false
+	}
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go s.streamOutput(task.Name, "stdout", stdoutPipe, &stdoutBuf, &wg)
+	go s.streamOutput(task.Name, "stderr", stderrPipe, &stderrBuf, &wg)
+
+	err = cmd.Start()
+	if err != nil {
+		return -1, "", "", false, err, false
+	}
+
+	wg.Wait()
+	err = cmd.Wait()
+
 	stdoutStr = stdoutBuf.String()
 	stderrStr = stderrBuf.String()
 
@@ -476,9 +508,22 @@ func (s *Scheduler) runCommandWithWaitStrategy(task *models.Task, execution *mod
 
 	cmd := exec.CommandContext(ctx, shellName, shellArg, task.Command)
 
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return -1, "", "", false, err, false
+	}
+
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return -1, "", "", false, err, false
+	}
+
 	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go s.streamOutput(task.Name, "stdout", stdoutPipe, &stdoutBuf, &wg)
+	go s.streamOutput(task.Name, "stderr", stderrPipe, &stderrBuf, &wg)
 
 	timeoutChan := time.After(timeout)
 	doneChan := make(chan struct{})
@@ -498,7 +543,13 @@ func (s *Scheduler) runCommandWithWaitStrategy(task *models.Task, execution *mod
 		}
 	}()
 
-	err = cmd.Run()
+	err = cmd.Start()
+	if err != nil {
+		return -1, "", "", false, err, false
+	}
+
+	wg.Wait()
+	err = cmd.Wait()
 	close(doneChan)
 
 	stdoutStr = stdoutBuf.String()
@@ -513,6 +564,34 @@ func (s *Scheduler) runCommandWithWaitStrategy(task *models.Task, execution *mod
 	}
 
 	return exitCode, stdoutStr, stderrStr, timedOut, err, alertSent
+}
+
+func (s *Scheduler) streamOutput(taskName, stream string, reader io.Reader, buf *bytes.Buffer, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		buf.WriteString(line)
+		buf.WriteString("\n")
+		s.wsHub.BroadcastLog(taskName, stream, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		rest := make([]byte, 4096)
+		for {
+			n, readErr := reader.Read(rest)
+			if n > 0 {
+				buf.Write(rest[:n])
+				s.wsHub.BroadcastLog(taskName, stream, string(rest[:n]))
+			}
+			if readErr != nil {
+				break
+			}
+		}
+	}
 }
 
 func (s *Scheduler) TriggerTask(taskID uuid.UUID, taskName string, triggerType string) (*models.ExecutionHistory, error) {

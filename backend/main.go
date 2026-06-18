@@ -8,6 +8,7 @@ import (
 	"cron-scheduler/internal/redis"
 	"cron-scheduler/internal/repository"
 	"cron-scheduler/internal/scheduler"
+	"cron-scheduler/internal/ws"
 	"context"
 	"fmt"
 	"log"
@@ -158,8 +159,11 @@ func main() {
 	_ = defaultTimeout
 	_ = defaultCompensation
 
+	wsHub := ws.NewHub()
+	go wsHub.Run()
+
 	alerter := alerter.NewAlerter(repo, webhookURL, consecutiveFailures, silentMinutes)
-	scheduler := scheduler.NewScheduler(repo, redisClient, alerter, maxConcurrent)
+	scheduler := scheduler.NewScheduler(repo, redisClient, alerter, maxConcurrent, wsHub)
 	missedDetector := missed.NewMissedDetector(repo)
 
 	err = scheduler.Start()
@@ -190,7 +194,7 @@ func main() {
 		}
 	}
 
-	handler := api.NewHandler(repo, scheduler, missedDetector, alerter)
+	handler := api.NewHandler(repo, scheduler, missedDetector, alerter, wsHub)
 	router := api.SetupRouter(handler)
 
 	go func() {

@@ -7,6 +7,7 @@ import (
 	"cron-scheduler/internal/models"
 	"cron-scheduler/internal/repository"
 	"cron-scheduler/internal/scheduler"
+	"cron-scheduler/internal/ws"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -23,14 +24,16 @@ type Handler struct {
 	scheduler      *scheduler.Scheduler
 	missedDetector *missed.MissedDetector
 	alerter        *alerter.Alerter
+	wsHub          *ws.Hub
 }
 
-func NewHandler(repo *repository.Repository, sched *scheduler.Scheduler, md *missed.MissedDetector, al *alerter.Alerter) *Handler {
+func NewHandler(repo *repository.Repository, sched *scheduler.Scheduler, md *missed.MissedDetector, al *alerter.Alerter, wsHub *ws.Hub) *Handler {
 	return &Handler{
 		repo:           repo,
 		scheduler:      sched,
 		missedDetector: md,
 		alerter:        al,
+		wsHub:          wsHub,
 	}
 }
 
@@ -77,7 +80,10 @@ func SetupRouter(handler *Handler) *gin.Engine {
 		api.POST("/missed/detect", handler.DetectMissedHandler)
 
 		api.GET("/health", handler.HealthHandler)
+		api.GET("/executions/running", handler.ListRunningExecutionsHandler)
 	}
+
+	r.GET("/ws/executions", ws.ServeWS(handler.wsHub))
 
 	return r
 }
@@ -1116,6 +1122,45 @@ func (h *Handler) TestWebhookHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    resp,
+		"message": "ok",
+	})
+}
+
+func (h *Handler) ListRunningExecutionsHandler(c *gin.Context) {
+	execs, err := h.repo.GetRunningExecutions()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	items := make([]models.ExecutionResponse, 0, len(execs))
+	for i := range execs {
+		items = append(items, models.ExecutionResponse{
+			ID:           execs[i].ID,
+			TaskID:       execs[i].TaskID,
+			TaskName:     execs[i].TaskName,
+			TriggerType:  execs[i].TriggerType,
+			TriggerTime:  execs[i].TriggerTime,
+			StartTime:    execs[i].StartTime,
+			EndTime:      execs[i].EndTime,
+			DurationMs:   execs[i].DurationMs,
+			Status:       execs[i].Status,
+			ExitCode:     execs[i].ExitCode,
+			Stdout:       execs[i].Stdout,
+			Stderr:       execs[i].Stderr,
+			RetryCount:   execs[i].RetryCount,
+			ErrorMessage: execs[i].ErrorMessage,
+			CreatedAt:    execs[i].CreatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    items,
 		"message": "ok",
 	})
 }

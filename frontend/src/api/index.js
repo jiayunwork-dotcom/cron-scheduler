@@ -109,3 +109,7 @@ export const batchDeleteTasks = (taskNames) => {
 export const testWebhook = (webhookUrl) => {
   return request.post('/settings/webhook/test', { webhook_url: webhookUrl })
 }
+
+export const getRunningExecutions = () => {
+  return request.get('/executions/running')
+}
