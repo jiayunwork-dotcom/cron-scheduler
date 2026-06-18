@@ -326,7 +326,7 @@ func (c *CronExpression) matches(t time.Time) bool {
 	second := t.Second()
 	minute := t.Minute()
 	hour := t.Hour()
-	_ = t.Day()
+	day := t.Day()
 	month := int(t.Month())
 	weekday := int(t.Weekday())
 	year := t.Year()
@@ -337,6 +337,10 @@ func (c *CronExpression) matches(t time.Time) bool {
 			return false
 		}
 		idx++
+	} else {
+		if second != 0 {
+			return false
+		}
 	}
 	if !c.Fields[idx].Values[minute] {
 		return false
