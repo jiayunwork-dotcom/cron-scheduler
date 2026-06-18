@@ -393,7 +393,8 @@ async function handleBatchEnable() {
   if (selectedTasks.value.length === 0) return
   try {
     const result = await api.batchEnableTasks(getSelectedTaskNames())
-    ElMessage.success(`成功启用 ${result.success_count} 个任务${result.failed_count > 0 ? `,失败 ${result.failed_count} 个` : '')
+    const failedMsg = result.failed_count > 0 ? `，失败 ${result.failed_count} 个` : ''
+    ElMessage.success(`成功启用 ${result.success_count} 个任务${failedMsg}`)
     clearSelection()
     loadData()
   } catch (err) {
@@ -405,7 +406,8 @@ async function handleBatchDisable() {
   if (selectedTasks.value.length === 0) return
   try {
     const result = await api.batchDisableTasks(getSelectedTaskNames())
-    ElMessage.success(`成功暂停 ${result.success_count} 个任务${result.failed_count > 0 ? `,失败 ${result.failed_count} 个` : '')
+    const failedMsg = result.failed_count > 0 ? `，失败 ${result.failed_count} 个` : ''
+    ElMessage.success(`成功暂停 ${result.success_count} 个任务${failedMsg}`)
     clearSelection()
     loadData()
   } catch (err) {
@@ -417,7 +419,8 @@ async function handleBatchDelete() {
   if (selectedTasks.value.length === 0) return
   try {
     const result = await api.batchDeleteTasks(getSelectedTaskNames())
-    ElMessage.success(`成功删除 ${result.success_count} 个任务${result.failed_count > 0 ? `,失败 ${result.failed_count} 个` : '')
+    const failedMsg = result.failed_count > 0 ? `，失败 ${result.failed_count} 个` : ''
+    ElMessage.success(`成功删除 ${result.success_count} 个任务${failedMsg}`)
     clearSelection()
     loadData()
   } catch (err) {
