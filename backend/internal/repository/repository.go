@@ -403,3 +403,18 @@ func (r *Repository) GetRecentCompletedExecutions(limit int) ([]models.Execution
 	}
 	return execs, nil
 }
+
+func (r *Repository) ListExecutionsForCalendar(startDate, endDate time.Time) ([]models.ExecutionHistory, error) {
+	var execs []models.ExecutionHistory
+	query := r.db.Where("status != ?", models.StatusPending)
+	if !startDate.IsZero() {
+		query = query.Where("start_time >= ? OR (start_time IS NULL AND trigger_time >= ?)", startDate, startDate)
+	}
+	if !endDate.IsZero() {
+		query = query.Where("start_time < ? OR (start_time IS NULL AND trigger_time < ?)", endDate.AddDate(0, 0, 1), endDate.AddDate(0, 0, 1))
+	}
+	if err := query.Order("start_time ASC NULLS LAST, trigger_time ASC").Find(&execs).Error; err != nil {
+		return nil, fmt.Errorf("获取日历执行记录失败: %w", err)
+	}
+	return execs, nil
+}

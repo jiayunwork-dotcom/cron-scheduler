@@ -121,3 +121,7 @@ export const getExecutionHistory = () => {
 export const getExecutionDetail = (id) => {
   return request.get(`/executions/${id}/detail`)
 }
+
+export const getCalendarExecutions = (params) => {
+  return request.get('/executions/calendar', { params })
+}

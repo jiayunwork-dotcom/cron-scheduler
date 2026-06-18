@@ -31,6 +31,11 @@ const routes = [
     component: () => import('../views/ExecutionHistory.vue')
   },
   {
+    path: '/calendar',
+    name: 'ScheduleCalendar',
+    component: () => import('../views/ScheduleCalendar.vue')
+  },
+  {
     path: '/monitor',
     name: 'RealtimeMonitor',
     component: () => import('../views/RealtimeMonitor.vue')

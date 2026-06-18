@@ -69,6 +69,7 @@ func SetupRouter(handler *Handler) *gin.Engine {
 
 		api.GET("/executions", handler.ListExecutionsHandler)
 		api.GET("/executions/history", handler.GetExecutionHistoryHandler)
+		api.GET("/executions/calendar", handler.GetCalendarExecutionsHandler)
 		api.GET("/executions/:id", handler.GetExecutionHandler)
 		api.GET("/executions/:id/detail", handler.GetExecutionDetailHandler)
 
@@ -1257,6 +1258,73 @@ func (h *Handler) GetExecutionDetailHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    resp,
+		"message": "ok",
+	})
+}
+
+func getWeekRange(t time.Time) (time.Time, time.Time) {
+	weekday := int(t.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	monday := t.AddDate(0, 0, 1-weekday)
+	monday = time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, monday.Location())
+	sunday := monday.AddDate(0, 0, 6)
+	sunday = time.Date(sunday.Year(), sunday.Month(), sunday.Day(), 23, 59, 59, 999999999, sunday.Location())
+	return monday, sunday
+}
+
+func (h *Handler) GetCalendarExecutionsHandler(c *gin.Context) {
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+
+	now := time.Now()
+	var startDate, endDate time.Time
+	var err error
+
+	if startDateStr == "" || endDateStr == "" {
+		startDate, endDate = getWeekRange(now)
+	} else {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			startDate, endDate = getWeekRange(now)
+		} else {
+			endDate, err = time.Parse("2006-01-02", endDateStr)
+			if err != nil {
+				startDate, endDate = getWeekRange(now)
+			} else {
+				startDate = time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, startDate.Location())
+				endDate = time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 23, 59, 59, 999999999, endDate.Location())
+			}
+		}
+	}
+
+	execs, err := h.repo.ListExecutionsForCalendar(startDate, endDate)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	items := make([]models.CalendarExecutionResponse, 0, len(execs))
+	for i := range execs {
+		items = append(items, models.CalendarExecutionResponse{
+			ID:          execs[i].ID,
+			TaskName:    execs[i].TaskName,
+			Status:      execs[i].Status,
+			StartTime:   execs[i].StartTime,
+			EndTime:     execs[i].EndTime,
+			DurationMs:  execs[i].DurationMs,
+			TriggerType: execs[i].TriggerType,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    items,
 		"message": "ok",
 	})
 }

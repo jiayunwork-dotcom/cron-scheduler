@@ -137,3 +137,13 @@ type WebhookTestResponse struct {
 	Error      string `json:"error,omitempty"`
 	Message    string `json:"message,omitempty"`
 }
+
+type CalendarExecutionResponse struct {
+	ID          uuid.UUID  `json:"id"`
+	TaskName    string     `json:"task_name"`
+	Status      string     `json:"status"`
+	StartTime   *time.Time `json:"start_time"`
+	EndTime     *time.Time `json:"end_time"`
+	DurationMs  *int64     `json:"duration_ms"`
+	TriggerType string     `json:"trigger_type"`
+}

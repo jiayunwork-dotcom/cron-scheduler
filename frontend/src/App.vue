@@ -24,6 +24,10 @@
             <el-icon><Timer /></el-icon>
             <span>执行历史</span>
           </el-menu-item>
+          <el-menu-item index="/calendar">
+            <el-icon><Calendar /></el-icon>
+            <span>调度日历</span>
+          </el-menu-item>
           <el-menu-item index="/monitor">
             <el-icon><Monitor /></el-icon>
             <span>实时监控</span>
@@ -44,6 +48,14 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import {
+  List,
+  Share,
+  Timer,
+  Monitor,
+  Setting,
+  Calendar
+} from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => {
