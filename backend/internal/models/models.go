@@ -63,6 +63,8 @@ type Task struct {
 	UpdatedAt        time.Time
 }
 
+func (Task) TableName() string { return "tasks" }
+
 type ExecutionHistory struct {
 	ID           uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	TaskID       uuid.UUID  `gorm:"type:uuid;index;column:task_id"`
@@ -81,6 +83,8 @@ type ExecutionHistory struct {
 	CreatedAt    time.Time
 }
 
+func (ExecutionHistory) TableName() string { return "execution_history" }
+
 type Alert struct {
 	ID           uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	TaskID       uuid.UUID  `gorm:"type:uuid;index;column:task_id"`
@@ -95,11 +99,15 @@ type Alert struct {
 	CreatedAt    time.Time
 }
 
+func (Alert) TableName() string { return "alerts" }
+
 type SystemSetting struct {
 	Key       string `gorm:"type:varchar(100);primaryKey"`
 	Value     string `gorm:"type:text;default:''"`
 	UpdatedAt time.Time
 }
+
+func (SystemSetting) TableName() string { return "system_settings" }
 
 type MissedExecution struct {
 	ID             uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
@@ -112,3 +120,5 @@ type MissedExecution struct {
 	CompensatedAt  *time.Time `gorm:"column:compensated_at"`
 	CreatedAt      time.Time
 }
+
+func (MissedExecution) TableName() string { return "missed_executions" }

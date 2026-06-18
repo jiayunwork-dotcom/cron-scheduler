@@ -4,6 +4,7 @@ import (
 	"cron-scheduler/internal/alerter"
 	"cron-scheduler/internal/api"
 	"cron-scheduler/internal/missed"
+	"cron-scheduler/internal/models"
 	"cron-scheduler/internal/redis"
 	"cron-scheduler/internal/repository"
 	"cron-scheduler/internal/scheduler"
@@ -83,6 +84,35 @@ func main() {
 		log.Fatalf("连接数据库失败: %v", err)
 	}
 	log.Println("数据库连接成功")
+
+	db.Exec("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\"")
+
+	err = db.AutoMigrate(
+		&models.Task{},
+		&models.ExecutionHistory{},
+		&models.Alert{},
+		&models.SystemSetting{},
+		&models.MissedExecution{},
+	)
+	if err != nil {
+		log.Fatalf("数据库自动迁移失败: %v", err)
+	}
+	log.Println("数据库表结构同步完成")
+
+	var settingsCount int64
+	db.Model(&models.SystemSetting{}).Count(&settingsCount)
+	if settingsCount == 0 {
+		defaultSettings := []models.SystemSetting{
+			{Key: "max_concurrent_jobs", Value: "5", UpdatedAt: time.Now()},
+			{Key: "default_timeout_sec", Value: "60", UpdatedAt: time.Now()},
+			{Key: "alert_webhook_url", Value: "", UpdatedAt: time.Now()},
+			{Key: "default_compensation", Value: "skip", UpdatedAt: time.Now()},
+			{Key: "consecutive_failures_for_alert", Value: "1", UpdatedAt: time.Now()},
+			{Key: "alert_silent_minutes", Value: "5", UpdatedAt: time.Now()},
+		}
+		db.Create(&defaultSettings)
+		log.Println("已插入默认系统设置")
+	}
 
 	redisAddr := fmt.Sprintf("%s:%s", redisHost, redisPort)
 	redisClient, err := connectRedis(redisAddr)
