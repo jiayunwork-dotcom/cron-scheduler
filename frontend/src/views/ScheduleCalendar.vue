@@ -32,6 +32,38 @@
       <el-button @click="goThisWeek">本周</el-button>
     </div>
 
+    <div class="stats-cards" style="margin-top: 16px; margin-bottom: 16px">
+      <el-card class="stat-card">
+        <div class="stat-label">总执行次数</div>
+        <div class="stat-value">{{ stats.totalCount }}</div>
+      </el-card>
+      <el-card class="stat-card">
+        <div class="stat-label">成功率</div>
+        <div class="stat-value success">{{ stats.successRate }}%</div>
+      </el-card>
+      <el-card class="stat-card">
+        <div class="stat-label">平均耗时</div>
+        <div class="stat-value">{{ stats.avgDuration }}s</div>
+      </el-card>
+      <el-card class="stat-card">
+        <div class="stat-label">失败任务 Top3</div>
+        <div class="stat-failed-list">
+          <div
+            v-for="(item, index) in stats.topFailedTasks"
+            :key="item.name"
+            class="stat-failed-item"
+          >
+            <span class="stat-failed-rank">{{ index + 1 }}</span>
+            <span class="stat-failed-name">{{ item.name }}</span>
+            <span class="stat-failed-count">{{ item.count }}次</span>
+          </div>
+          <div v-if="stats.topFailedTasks.length === 0" class="stat-failed-empty">
+            暂无失败任务
+          </div>
+        </div>
+      </el-card>
+    </div>
+
     <div class="legend-bar" style="margin-top: 12px; margin-bottom: 12px">
       <span class="legend-label">状态图例:</span>
       <span class="legend-item"><span class="legend-color success"></span>成功</span>
@@ -92,7 +124,10 @@
                       <template #reference>
                         <div
                           class="execution-block"
-                          :class="'status-' + slot.exec.status"
+                          :class="[
+                            'status-' + slot.exec.status,
+                            { 'is-selected': selectedExecutionIds.has(slot.exec.id) }
+                          ]"
                           :style="{
                             top: slot.top + 'px',
                             height: slot.height + 'px',
@@ -100,6 +135,7 @@
                             width: slot.width + '%',
                             backgroundColor: getStatusColor(slot.exec.status)
                           }"
+                          @click.stop="handleBlockClick(slot.exec)"
                         >
                           <span class="block-text">{{ getTaskShortName(slot.exec.task_name) }}</span>
                         </div>
@@ -188,12 +224,24 @@
         </div>
       </div>
     </div>
+
+    <div class="batch-action-bar" v-if="hasSelection">
+      <div class="batch-action-info">
+        已选中 <strong>{{ selectedExecutionIds.size }}</strong> 条记录
+      </div>
+      <div class="batch-action-buttons">
+        <el-button type="primary" @click="handleBatchRerun">批量重新执行</el-button>
+        <el-button @click="handleExportCSV">导出CSV</el-button>
+        <el-button @click="clearSelection">关闭</el-button>
+      </div>
+    </div>
   </el-card>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import * as api from '@/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 
@@ -203,6 +251,9 @@ const loading = ref(false)
 const executions = ref([])
 const allTaskNames = ref([])
 const filterTaskName = ref('')
+const selectedExecutionIds = ref(new Set())
+const shiftPressed = ref(false)
+const batchRerunDialogVisible = ref(false)
 
 const hourHeight = 40
 const MIN_DURATION_MIN = 3
@@ -245,6 +296,59 @@ const filteredExecutions = computed(() => {
   }
   return list
 })
+
+const stats = computed(() => {
+  const list = filteredExecutions.value
+  const totalCount = list.length
+
+  let successCount = 0
+  let totalDurationMs = 0
+  let durationCount = 0
+  const failedTaskMap = {}
+
+  for (const exec of list) {
+    if (exec.status === 'success') {
+      successCount++
+    }
+    if (exec.status === 'failed' || exec.status === 'timeout') {
+      if (failedTaskMap[exec.task_name]) {
+        failedTaskMap[exec.task_name]++
+      } else {
+        failedTaskMap[exec.task_name] = 1
+      }
+    }
+    if (exec.duration_ms != null) {
+      totalDurationMs += exec.duration_ms
+      durationCount++
+    }
+  }
+
+  const successRate = totalCount > 0
+    ? ((successCount / totalCount) * 100).toFixed(1)
+    : '0.0'
+
+  const avgDuration = durationCount > 0
+    ? ((totalDurationMs / durationCount) / 1000).toFixed(1)
+    : '0.0'
+
+  const topFailedTasks = Object.entries(failedTaskMap)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3)
+
+  return {
+    totalCount,
+    successRate,
+    avgDuration,
+    topFailedTasks
+  }
+})
+
+const selectedExecutions = computed(() => {
+  return filteredExecutions.value.filter(e => selectedExecutionIds.value.has(e.id))
+})
+
+const hasSelection = computed(() => selectedExecutionIds.value.size > 0)
 
 const executionsByDay = computed(() => {
   const map = {}
@@ -477,9 +581,139 @@ const loadAllTaskNames = async () => {
   }
 }
 
+const handleBlockClick = (exec) => {
+  if (shiftPressed.value) {
+    const newSet = new Set(selectedExecutionIds.value)
+    if (newSet.has(exec.id)) {
+      newSet.delete(exec.id)
+    } else {
+      newSet.add(exec.id)
+    }
+    selectedExecutionIds.value = newSet
+  } else {
+    if (selectedExecutionIds.value.size > 0) {
+      selectedExecutionIds.value = new Set()
+    }
+  }
+}
+
+const clearSelection = () => {
+  selectedExecutionIds.value = new Set()
+}
+
+const handleBatchRerun = async () => {
+  const selected = selectedExecutions.value
+  if (selected.length === 0) {
+    ElMessage.warning('请先选择执行记录')
+    return
+  }
+
+  const taskListHtml = selected
+    .map(e => `<div style="padding: 4px 0;">• ${e.task_name} (${formatDateTime(e.start_time)})</div>`)
+    .join('')
+
+  try {
+    await ElMessageBox.confirm(
+      `即将重新触发以下 ${selected.length} 个任务：<br/><br/>${taskListHtml}`,
+      '批量重新执行确认',
+      {
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '确认执行',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    let successCount = 0
+    let failCount = 0
+
+    for (const exec of selected) {
+      try {
+        await api.triggerTask(exec.task_name)
+        successCount++
+      } catch (err) {
+        failCount++
+      }
+    }
+
+    if (failCount === 0) {
+      ElMessage.success(`成功触发 ${successCount} 个任务`)
+    } else {
+      ElMessage.warning(`成功触发 ${successCount} 个，失败 ${failCount} 个`)
+    }
+
+    clearSelection()
+    loadData()
+  } catch {
+  }
+}
+
+const handleExportCSV = () => {
+  const selected = selectedExecutions.value
+  if (selected.length === 0) {
+    ElMessage.warning('请先选择执行记录')
+    return
+  }
+
+  const headers = ['task_name', 'status', 'start_time', 'end_time', 'duration_ms', 'trigger_type']
+  const headerCn = ['任务名', '状态', '开始时间', '结束时间', '耗时(ms)', '触发类型']
+
+  const rows = selected.map(exec => {
+    return [
+      exec.task_name || '',
+      getStatusText(exec.status),
+      exec.start_time ? formatDateTime(exec.start_time) : '',
+      exec.end_time ? formatDateTime(exec.end_time) : '',
+      exec.duration_ms != null ? exec.duration_ms : '',
+      getTriggerTypeText(exec.trigger_type)
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')
+  })
+
+  const csvContent = [headerCn.join(','), ...rows].join('\n')
+  const BOM = '\uFEFF'
+  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' })
+
+  const dateStr = dayjs().format('YYYY-MM-DD')
+  const fileName = `executions_${dateStr}.csv`
+
+  const link = document.createElement('a')
+  const url = URL.createObjectURL(blob)
+  link.setAttribute('href', url)
+  link.setAttribute('download', fileName)
+  link.style.visibility = 'hidden'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+
+  ElMessage.success(`已导出 ${selected.length} 条记录`)
+}
+
+const handleKeyDown = (e) => {
+  if (e.key === 'Shift') {
+    shiftPressed.value = true
+  }
+  if (e.key === 'Escape' && hasSelection.value) {
+    clearSelection()
+  }
+}
+
+const handleKeyUp = (e) => {
+  if (e.key === 'Shift') {
+    shiftPressed.value = false
+  }
+}
+
 onMounted(() => {
   loadData()
   loadAllTaskNames()
+  window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('keyup', handleKeyUp)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keyup', handleKeyUp)
 })
 </script>
 
@@ -489,6 +723,85 @@ onMounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.stats-cards {
+  display: flex;
+  gap: 16px;
+}
+
+.stat-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.stat-value.success {
+  color: #67c23a;
+}
+
+.stat-failed-list {
+  font-size: 13px;
+}
+
+.stat-failed-item {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+  gap: 8px;
+}
+
+.stat-failed-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: #f56c6c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.stat-failed-item:nth-child(2) .stat-failed-rank {
+  background-color: #e6a23c;
+}
+
+.stat-failed-item:nth-child(3) .stat-failed-rank {
+  background-color: #909399;
+}
+
+.stat-failed-name {
+  flex: 1;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat-failed-count {
+  color: #f56c6c;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.stat-failed-empty {
+  color: #c0c4cc;
+  font-size: 12px;
+  padding: 8px 0;
 }
 
 .legend-bar {
@@ -675,6 +988,12 @@ onMounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
+.execution-block.is-selected {
+  outline: 2px dashed #409eff;
+  outline-offset: 1px;
+  z-index: 6;
+}
+
 .execution-block.more-block {
   background-color: #6b7280;
   color: #fff;
@@ -756,5 +1075,36 @@ onMounted(() => {
 
 .popover-list-item:last-child {
   border-bottom: none;
+}
+
+.batch-action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: #fff;
+  border-top: 1px solid #ebeef5;
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.1);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 1000;
+}
+
+.batch-action-info {
+  font-size: 14px;
+  color: #606266;
+}
+
+.batch-action-info strong {
+  color: #409eff;
+  font-size: 16px;
+  margin: 0 4px;
+}
+
+.batch-action-buttons {
+  display: flex;
+  gap: 12px;
 }
 </style>
