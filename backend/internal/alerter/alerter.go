@@ -58,7 +58,7 @@ func (a *Alerter) CheckAndAlert(task *models.Task, exec *models.ExecutionHistory
 
 	a.mu.Lock()
 	a.failureCount[task.Name]++
-	count := a.failureCount[task.Name]
+	_ = a.failureCount[task.Name]
 	a.mu.Unlock()
 
 	if !a.shouldAlert(task.Name) {

@@ -836,9 +836,10 @@ func (h *Handler) ListMissedHandler(c *gin.Context) {
 
 	var missedList []models.MissedExecution
 	var err error
+	var task *models.Task
 
 	if taskName != "" {
-		task, err := h.repo.GetTaskByName(taskName)
+		task, err = h.repo.GetTaskByName(taskName)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
