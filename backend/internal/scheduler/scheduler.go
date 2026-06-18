@@ -297,7 +297,11 @@ func (s *Scheduler) executeTask(taskID string) {
 	s.executingTasks.Store(taskID, true)
 	defer s.executingTasks.Delete(taskID)
 
-	ttl := time.Duration(task.TimeoutSec+300) * time.Second
+	maxRunDuration := time.Duration(task.TimeoutSec+300) * time.Second
+	if task.TimeoutStrategy == models.TimeoutWaitMark || task.TimeoutStrategy == models.TimeoutAlertAndWait {
+		maxRunDuration = 24 * time.Hour
+	}
+	ttl := maxRunDuration
 	if err := s.redisClient.RunningTaskAdd(taskID, ttl); err != nil {
 		return
 	}
@@ -313,7 +317,7 @@ func (s *Scheduler) executeTask(taskID string) {
 	task.LastRunAt = &now
 	_ = s.repo.UpdateTask(task)
 
-	exitCode, stdout, stderr, timedOut, runErr := s.runCommand(task, exec)
+	exitCode, stdout, stderr, timedOut, runErr, alertSent := s.runCommand(task, exec)
 
 	endTime := time.Now()
 	durationMs := endTime.Sub(now).Milliseconds()
@@ -326,7 +330,13 @@ func (s *Scheduler) executeTask(taskID string) {
 		exec.ErrorMessage = runErr.Error()
 	}
 
-	if timedOut {
+	if timedOut && task.TimeoutStrategy == models.TimeoutKillAndFail {
+		exec.Status = models.StatusFailed
+		exec.ExitCode = nil
+		if exec.ErrorMessage == "" {
+			exec.ErrorMessage = "执行超时,已强制终止"
+		}
+	} else if timedOut {
 		exec.Status = models.StatusTimeout
 		exec.ExitCode = nil
 		if exec.ErrorMessage == "" {
@@ -348,7 +358,10 @@ func (s *Scheduler) executeTask(taskID string) {
 
 	_ = s.repo.UpdateExecution(exec)
 
-	if (exec.Status == models.StatusFailed || exec.Status == models.StatusTimeout) && exec.RetryCount < task.MaxRetries {
+	shouldRetry := (exec.Status == models.StatusFailed || exec.Status == models.StatusTimeout) && exec.RetryCount < task.MaxRetries
+	shouldAlert := (exec.Status == models.StatusFailed || exec.Status == models.StatusTimeout) && !alertSent
+
+	if shouldRetry {
 		exec.RetryCount++
 		retryInterval := s.calculateRetryInterval(task, exec.RetryCount)
 		retryExec := &models.ExecutionHistory{
@@ -367,7 +380,7 @@ func (s *Scheduler) executeTask(taskID string) {
 		time.AfterFunc(retryInterval, func() {
 			_ = s.redisClient.ReadyQueueAdd(taskID, task.Priority)
 		})
-	} else if exec.Status == models.StatusFailed || exec.Status == models.StatusTimeout {
+	} else if shouldAlert {
 		_ = s.alerter.CheckAndAlert(task, exec)
 	}
 
@@ -405,7 +418,7 @@ func (s *Scheduler) getEarliestPendingExecution(taskID uuid.UUID) (*models.Execu
 	return earliest, nil
 }
 
-func (s *Scheduler) runCommand(task *models.Task, execution *models.ExecutionHistory) (exitCode int, stdoutStr string, stderrStr string, timedOut bool, err error) {
+func (s *Scheduler) runCommand(task *models.Task, execution *models.ExecutionHistory) (exitCode int, stdoutStr string, stderrStr string, timedOut bool, err error, alertSent bool) {
 	var shellName, shellArg string
 	if runtime.GOOS == "windows" {
 		shellName = "cmd"
@@ -416,6 +429,18 @@ func (s *Scheduler) runCommand(task *models.Task, execution *models.ExecutionHis
 	}
 
 	timeout := time.Duration(task.TimeoutSec) * time.Second
+
+	switch task.TimeoutStrategy {
+	case models.TimeoutWaitMark, models.TimeoutAlertAndWait:
+		return s.runCommandWithWaitStrategy(task, execution, shellName, shellArg, timeout)
+	case models.TimeoutKillAndFail:
+		fallthrough
+	default:
+		return s.runCommandWithKillStrategy(task, shellName, shellArg, timeout)
+	}
+}
+
+func (s *Scheduler) runCommandWithKillStrategy(task *models.Task, shellName, shellArg string, timeout time.Duration) (exitCode int, stdoutStr string, stderrStr string, timedOut bool, err error, alertSent bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -442,8 +467,52 @@ func (s *Scheduler) runCommand(task *models.Task, execution *models.ExecutionHis
 		err = ctx.Err()
 	}
 
-	_ = execution
-	return exitCode, stdoutStr, stderrStr, timedOut, err
+	return exitCode, stdoutStr, stderrStr, timedOut, err, false
+}
+
+func (s *Scheduler) runCommandWithWaitStrategy(task *models.Task, execution *models.ExecutionHistory, shellName, shellArg string, timeout time.Duration) (exitCode int, stdoutStr string, stderrStr string, timedOut bool, err error, alertSent bool) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, shellName, shellArg, task.Command)
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	timeoutChan := time.After(timeout)
+	doneChan := make(chan struct{})
+
+	go func() {
+		select {
+		case <-timeoutChan:
+			timedOut = true
+			if task.TimeoutStrategy == models.TimeoutAlertAndWait {
+				tempExec := *execution
+				tempExec.Status = models.StatusTimeout
+				tempExec.ErrorMessage = "执行超时,继续等待中"
+				_ = s.alerter.CheckAndAlert(task, &tempExec)
+				alertSent = true
+			}
+		case <-doneChan:
+		}
+	}()
+
+	err = cmd.Run()
+	close(doneChan)
+
+	stdoutStr = stdoutBuf.String()
+	stderrStr = stderrBuf.String()
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	return exitCode, stdoutStr, stderrStr, timedOut, err, alertSent
 }
 
 func (s *Scheduler) TriggerTask(taskID uuid.UUID, taskName string, triggerType string) (*models.ExecutionHistory, error) {

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     cron_expr VARCHAR(255) NOT NULL,
     command TEXT NOT NULL,
     timeout_sec INT DEFAULT 60,
+    timeout_strategy VARCHAR(30) DEFAULT 'kill_and_fail',
     max_retries INT DEFAULT 0,
     retry_strategy VARCHAR(20) DEFAULT 'fixed',
     retry_interval_sec INT DEFAULT 60,

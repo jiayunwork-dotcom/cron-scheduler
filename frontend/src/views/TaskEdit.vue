@@ -70,6 +70,23 @@
           />
         </el-form-item>
 
+        <el-form-item label="超时处理策略">
+          <el-select v-model="form.timeout_strategy" style="width: 360px">
+            <el-option label="强制终止并标记失败(默认)" value="kill_and_fail">
+              <div style="font-weight: 500">强制终止并标记失败</div>
+              <div style="font-size: 12px; color: #909399; margin-top: 2px">超时后立即终止任务执行,将状态标记为失败</div>
+            </el-option>
+            <el-option label="等待至自然结束再标记超时" value="wait_and_mark">
+              <div style="font-weight: 500">等待至自然结束再标记超时</div>
+              <div style="font-size: 12px; color: #909399; margin-top: 2px">不强制终止,等任务自然结束后,将状态标记为超时</div>
+            </el-option>
+            <el-option label="发送告警但不终止继续等待" value="alert_and_wait">
+              <div style="font-weight: 500">发送告警但不终止继续等待</div>
+              <div style="font-size: 12px; color: #909399; margin-top: 2px">超时时立即发送告警,但不终止任务,继续等待至自然结束</div>
+            </el-option>
+          </el-select>
+        </el-form-item>
+
         <el-form-item label="最大重试次数">
           <el-input-number
             v-model="form.max_retries"
@@ -180,6 +197,7 @@ const form = ref({
   cron_expr: '*/5 * * * *',
   command: '',
   timeout_sec: 60,
+  timeout_strategy: 'kill_and_fail',
   max_retries: 0,
   retry_strategy: 'fixed',
   retry_interval_sec: 60,
@@ -275,6 +293,7 @@ async function loadTaskData() {
       cron_expr: data.cron_expr || '*/5 * * * *',
       command: data.command || '',
       timeout_sec: data.timeout_sec ?? 60,
+      timeout_strategy: data.timeout_strategy || 'kill_and_fail',
       max_retries: data.max_retries ?? 0,
       retry_strategy: data.retry_strategy || 'fixed',
       retry_interval_sec: data.retry_interval_sec ?? 60,

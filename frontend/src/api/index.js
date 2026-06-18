@@ -93,3 +93,19 @@ export const detectMissed = () => {
 export const getHealth = () => {
   return request.get('/health')
 }
+
+export const batchEnableTasks = (taskNames) => {
+  return request.post('/tasks/batch/enable', { task_names: taskNames })
+}
+
+export const batchDisableTasks = (taskNames) => {
+  return request.post('/tasks/batch/disable', { task_names: taskNames })
+}
+
+export const batchDeleteTasks = (taskNames) => {
+  return request.post('/tasks/batch/delete', { task_names: taskNames })
+}
+
+export const testWebhook = (webhookUrl) => {
+  return request.post('/settings/webhook/test', { webhook_url: webhookUrl })
+}

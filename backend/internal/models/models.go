@@ -41,12 +41,19 @@ const (
 	RetryExponential = "exponential"
 )
 
+const (
+	TimeoutKillAndFail  = "kill_and_fail"
+	TimeoutWaitMark     = "wait_and_mark"
+	TimeoutAlertAndWait = "alert_and_wait"
+)
+
 type Task struct {
 	ID               uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	Name             string         `gorm:"type:varchar(255);uniqueIndex;not null"`
 	CronExpr         string         `gorm:"type:varchar(255);not null;column:cron_expr"`
 	Command          string         `gorm:"type:text;not null"`
 	TimeoutSec       int            `gorm:"default:60;column:timeout_sec"`
+	TimeoutStrategy  string         `gorm:"type:varchar(30);default:'kill_and_fail';column:timeout_strategy"`
 	MaxRetries       int            `gorm:"default:0;column:max_retries"`
 	RetryStrategy    string         `gorm:"type:varchar(20);default:'fixed';column:retry_strategy"`
 	RetryIntervalSec int            `gorm:"default:60;column:retry_interval_sec"`

@@ -18,6 +18,27 @@
           v-model="form.webhook_url" placeholder="https://example.com/webhook" />
       </el-form-item>
 
+      <el-form-item v-if="webhookTestResult.show">
+        <el-alert
+          :title="webhookTestResult.success ? '测试成功' : '测试失败'"
+          :type="webhookTestResult.success ? 'success' : 'error'"
+          :closable="false"
+          show-icon
+        >
+          <template #default>
+            <div v-if="webhookTestResult.success">
+              <div>HTTP 状态码: <b>{{ webhookTestResult.status_code }}</b></div>
+              <div>响应耗时: <b>{{ webhookTestResult.duration_ms }} ms</b></div>
+              <div v-if="webhookTestResult.message" style="margin-top: 4px; color: #67c23a">{{ webhookTestResult.message }}</div>
+            </div>
+            <div v-else>
+              <div>错误原因: <span style="color: #f56c6c">{{ webhookTestResult.error }}</span></div>
+              <div v-if="webhookTestResult.message" style="margin-top: 4px">{{ webhookTestResult.message }}</div>
+            </div>
+          </template>
+        </el-alert>
+      </el-form-item>
+
       <el-form-item label="默认补偿策略">
         <el-select v-model="form.default_compensation" style="width: 200px">
           <el-option label="跳过" value="skip" />
@@ -42,7 +63,9 @@
 
       <el-form-item>
         <el-button type="primary" @click="saveSettings">保存设置</el-button>
-        <el-button @click="testWebhook">测试Webhook</el-button>
+        <el-button :loading="webhookTesting" @click="testWebhook">
+          {{ webhookTesting ? '测试中...' : '测试Webhook' }}
+        </el-button>
       </el-form-item>
     </el-form>
 
@@ -99,6 +122,15 @@ const form = reactive({
 })
 
 const missedList = ref([])
+const webhookTesting = ref(false)
+const webhookTestResult = reactive({
+  show: false,
+  success: false,
+  status_code: 0,
+  duration_ms: 0,
+  error: '',
+  message: ''
+})
 
 const loadSettings = async () => {
   try {
@@ -142,8 +174,35 @@ const saveSettings = async () => {
   }
 }
 
-const testWebhook = () => {
-  ElMessage.info('Webhook测试功能将在任务失败时触发，实际发送需要真实失败场景')
+const testWebhook = async () => {
+  if (!form.webhook_url) {
+    ElMessage.warning('请先配置Webhook URL')
+    return
+  }
+  webhookTesting.value = true
+  webhookTestResult.show = false
+  try {
+    const result = await api.testWebhook(form.webhook_url)
+    webhookTestResult.show = true
+    webhookTestResult.success = result.success
+    webhookTestResult.status_code = result.status_code || 0
+    webhookTestResult.duration_ms = result.duration_ms || 0
+    webhookTestResult.error = result.error || ''
+    webhookTestResult.message = result.message || ''
+    if (result.success) {
+      ElMessage.success('Webhook测试成功')
+    } else {
+      ElMessage.error('Webhook测试失败,请查看详细信息')
+    }
+  } catch (err) {
+    webhookTestResult.show = true
+    webhookTestResult.success = false
+    webhookTestResult.error = err.message || '请求失败'
+    webhookTestResult.message = ''
+    ElMessage.error('Webhook测试失败')
+  } finally {
+    webhookTesting.value = false
+  }
 }
 
 const runDetect = async () => {

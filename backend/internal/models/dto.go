@@ -12,6 +12,7 @@ type CreateTaskRequest struct {
 	CronExpr         string         `json:"cron_expr"`
 	Command          string         `json:"command"`
 	TimeoutSec       int            `json:"timeout_sec"`
+	TimeoutStrategy  string         `json:"timeout_strategy"`
 	MaxRetries       int            `json:"max_retries"`
 	RetryStrategy    string         `json:"retry_strategy"`
 	RetryIntervalSec int            `json:"retry_interval_sec"`
@@ -29,6 +30,7 @@ type UpdateTaskRequest struct {
 	CronExpr         string         `json:"cron_expr"`
 	Command          string         `json:"command"`
 	TimeoutSec       int            `json:"timeout_sec"`
+	TimeoutStrategy  string         `json:"timeout_strategy"`
 	MaxRetries       int            `json:"max_retries"`
 	RetryStrategy    string         `json:"retry_strategy"`
 	RetryIntervalSec int            `json:"retry_interval_sec"`
@@ -47,6 +49,7 @@ type TaskResponse struct {
 	CronExpr         string         `json:"cron_expr"`
 	Command          string         `json:"command"`
 	TimeoutSec       int            `json:"timeout_sec"`
+	TimeoutStrategy  string         `json:"timeout_strategy"`
 	MaxRetries       int            `json:"max_retries"`
 	RetryStrategy    string         `json:"retry_strategy"`
 	RetryIntervalSec int            `json:"retry_interval_sec"`
@@ -115,4 +118,22 @@ type DAGEdge struct {
 type DAGResponse struct {
 	Nodes []DAGNode `json:"nodes"`
 	Edges []DAGEdge `json:"edges"`
+}
+
+type BatchTaskNamesRequest struct {
+	TaskNames []string `json:"task_names"`
+}
+
+type BatchOperationResult struct {
+	SuccessCount int      `json:"success_count"`
+	FailedCount  int      `json:"failed_count"`
+	FailedTasks  []string `json:"failed_tasks"`
+}
+
+type WebhookTestResponse struct {
+	Success    bool   `json:"success"`
+	StatusCode int    `json:"status_code,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Message    string `json:"message,omitempty"`
 }

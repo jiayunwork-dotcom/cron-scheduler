@@ -181,3 +181,82 @@ func (a *Alerter) shouldAlert(taskName string) bool {
 
 	return time.Since(lastAlert) > time.Duration(a.silentMinutes)*time.Minute
 }
+
+type TestWebhookResult struct {
+	Success    bool
+	StatusCode int
+	DurationMs int64
+	Error      string
+}
+
+func (a *Alerter) SendTestWebhook(webhookURL string) TestWebhookResult {
+	result := TestWebhookResult{
+		Success:    false,
+		StatusCode: 0,
+		DurationMs: 0,
+		Error:      "",
+	}
+
+	if webhookURL == "" {
+		result.Error = "Webhook URL 为空"
+		return result
+	}
+
+	payload := map[string]interface{}{
+		"task_name":      "test_task",
+		"execution_id":   "test-execution-id",
+		"status":         "test",
+		"error_message":  "这是一条测试告警消息,用于验证Webhook配置是否正确",
+		"stdout":         "test output",
+		"stderr":         "test error",
+		"exit_code":      nil,
+		"trigger_time":   time.Now(),
+		"duration_ms":    1234,
+		"timestamp":      time.Now(),
+		"alert_type":     "test",
+		"message":        "Webhook测试消息 - 如果您收到此消息,说明配置正确",
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		result.Error = fmt.Sprintf("序列化 payload 失败: %v", err)
+		return result
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewBuffer(body))
+	if err != nil {
+		result.Error = fmt.Sprintf("创建 HTTP 请求失败: %v", err)
+		return result
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	startTime := time.Now()
+	resp, err := client.Do(req)
+	result.DurationMs = time.Since(startTime).Milliseconds()
+
+	if err != nil {
+		result.Error = fmt.Sprintf("发送请求失败: %v", err)
+		return result
+	}
+	defer resp.Body.Close()
+
+	result.StatusCode = resp.StatusCode
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		result.Success = true
+	} else {
+		buf := new(bytes.Buffer)
+		_, _ = buf.ReadFrom(resp.Body)
+		responseBody := buf.String()
+		if len(responseBody) > 500 {
+			responseBody = responseBody[:500]
+		}
+		result.Error = fmt.Sprintf("返回状态码异常: %d, 响应体: %s", resp.StatusCode, responseBody)
+	}
+
+	return result
+}

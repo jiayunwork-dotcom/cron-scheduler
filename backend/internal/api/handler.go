@@ -56,6 +56,9 @@ func SetupRouter(handler *Handler) *gin.Engine {
 		api.POST("/tasks/:name/trigger", handler.TriggerTaskHandler)
 		api.POST("/tasks/:name/enable", handler.EnableTaskHandler)
 		api.POST("/tasks/:name/disable", handler.DisableTaskHandler)
+		api.POST("/tasks/batch/enable", handler.BatchEnableTasksHandler)
+		api.POST("/tasks/batch/disable", handler.BatchDisableTasksHandler)
+		api.POST("/tasks/batch/delete", handler.BatchDeleteTasksHandler)
 
 		api.POST("/cron/preview", handler.CronPreviewHandler)
 
@@ -68,6 +71,7 @@ func SetupRouter(handler *Handler) *gin.Engine {
 
 		api.GET("/settings", handler.GetSettingsHandler)
 		api.POST("/settings", handler.UpdateSettingsHandler)
+		api.POST("/settings/webhook/test", handler.TestWebhookHandler)
 
 		api.GET("/missed", handler.ListMissedHandler)
 		api.POST("/missed/detect", handler.DetectMissedHandler)
@@ -85,6 +89,7 @@ func taskToResponse(task *models.Task, repo *repository.Repository) (models.Task
 		CronExpr:         task.CronExpr,
 		Command:          task.Command,
 		TimeoutSec:       task.TimeoutSec,
+		TimeoutStrategy:  task.TimeoutStrategy,
 		MaxRetries:       task.MaxRetries,
 		RetryStrategy:    task.RetryStrategy,
 		RetryIntervalSec: task.RetryIntervalSec,
@@ -204,12 +209,18 @@ func (h *Handler) CreateTaskHandler(c *gin.Context) {
 		return
 	}
 
+	timeoutStrategy := req.TimeoutStrategy
+	if timeoutStrategy == "" {
+		timeoutStrategy = models.TimeoutKillAndFail
+	}
+
 	task := &models.Task{
 		ID:               uuid.New(),
 		Name:             req.Name,
 		CronExpr:         req.CronExpr,
 		Command:          req.Command,
 		TimeoutSec:       req.TimeoutSec,
+		TimeoutStrategy:  timeoutStrategy,
 		MaxRetries:       req.MaxRetries,
 		RetryStrategy:    req.RetryStrategy,
 		RetryIntervalSec: req.RetryIntervalSec,
@@ -296,6 +307,9 @@ func (h *Handler) UpdateTaskHandler(c *gin.Context) {
 	}
 	if req.TimeoutSec > 0 {
 		task.TimeoutSec = req.TimeoutSec
+	}
+	if req.TimeoutStrategy != "" {
+		task.TimeoutStrategy = req.TimeoutStrategy
 	}
 	if req.MaxRetries >= 0 {
 		task.MaxRetries = req.MaxRetries
@@ -948,6 +962,160 @@ func (h *Handler) HealthHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    status,
+		"message": "ok",
+	})
+}
+
+func (h *Handler) BatchEnableTasksHandler(c *gin.Context) {
+	var req models.BatchTaskNamesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	result := models.BatchOperationResult{
+		SuccessCount: 0,
+		FailedCount:  0,
+		FailedTasks:  []string{},
+	}
+
+	now := time.Now()
+	for _, name := range req.TaskNames {
+		task, err := h.repo.GetTaskByName(name)
+		if err != nil {
+			result.FailedCount++
+			result.FailedTasks = append(result.FailedTasks, name)
+			continue
+		}
+		task.Enabled = true
+		task.UpdatedAt = now
+		if err := h.repo.UpdateTask(task); err != nil {
+			result.FailedCount++
+			result.FailedTasks = append(result.FailedTasks, name)
+			continue
+		}
+		result.SuccessCount++
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+		"message": "ok",
+	})
+}
+
+func (h *Handler) BatchDisableTasksHandler(c *gin.Context) {
+	var req models.BatchTaskNamesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	result := models.BatchOperationResult{
+		SuccessCount: 0,
+		FailedCount:  0,
+		FailedTasks:  []string{},
+	}
+
+	now := time.Now()
+	for _, name := range req.TaskNames {
+		task, err := h.repo.GetTaskByName(name)
+		if err != nil {
+			result.FailedCount++
+			result.FailedTasks = append(result.FailedTasks, name)
+			continue
+		}
+		task.Enabled = false
+		task.UpdatedAt = now
+		if err := h.repo.UpdateTask(task); err != nil {
+			result.FailedCount++
+			result.FailedTasks = append(result.FailedTasks, name)
+			continue
+		}
+		result.SuccessCount++
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+		"message": "ok",
+	})
+}
+
+func (h *Handler) BatchDeleteTasksHandler(c *gin.Context) {
+	var req models.BatchTaskNamesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	result := models.BatchOperationResult{
+		SuccessCount: 0,
+		FailedCount:  0,
+		FailedTasks:  []string{},
+	}
+
+	for _, name := range req.TaskNames {
+		if err := h.repo.DeleteTask(name); err != nil {
+			result.FailedCount++
+			result.FailedTasks = append(result.FailedTasks, name)
+			continue
+		}
+		result.SuccessCount++
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+		"message": "ok",
+	})
+}
+
+func (h *Handler) TestWebhookHandler(c *gin.Context) {
+	var req map[string]string
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"data":    nil,
+			"message": fmt.Sprintf("请求参数错误: %v", err),
+		})
+		return
+	}
+
+	webhookURL := req["webhook_url"]
+	if webhookURL == "" {
+		webhookURL = h.repo.GetSetting("alert_webhook_url", "")
+	}
+
+	testResult := h.alerter.SendTestWebhook(webhookURL)
+
+	resp := models.WebhookTestResponse{
+		Success:    testResult.Success,
+		StatusCode: testResult.StatusCode,
+		DurationMs: testResult.DurationMs,
+		Error:      testResult.Error,
+	}
+	if testResult.Success {
+		resp.Message = "Webhook测试成功"
+	} else {
+		resp.Message = "Webhook测试失败"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    resp,
 		"message": "ok",
 	})
 }

@@ -55,7 +55,38 @@
       </el-button>
     </div>
 
-    <el-table :data="pagedTasks" stripe style="width: 100%">
+    <div v-if="selectedTasks.length > 0" class="batch-toolbar">
+      <span class="batch-info">已选择 {{ selectedTasks.length }} 项</span>
+      <el-button size="small" type="success" @click="handleBatchEnable">
+        <el-icon><VideoPlay /></el-icon>
+        一键启用
+      </el-button>
+      <el-button size="small" type="warning" @click="handleBatchDisable">
+        <el-icon><VideoPause /></el-icon>
+        一键暂停
+      </el-button>
+      <el-popconfirm
+          :title="`确认删除选中的 ${selectedTasks.length} 个任务?`"
+          @confirm="handleBatchDelete"
+        >
+          <template #reference>
+            <el-button size="small" type="danger">
+              <el-icon><Delete /></el-icon>
+              一键删除
+            </el-button>
+          </template>
+        </el-popconfirm>
+      <el-button size="small" @click="clearSelection">取消选择</el-button>
+    </div>
+
+    <el-table
+      :data="pagedTasks"
+      stripe
+      style="width: 100%"
+      ref="tableRef"
+      @selection-change="handleSelectionChange"
+    >
+      <el-table-column type="selection" width="50" align="center" />
       <el-table-column prop="name" label="任务名称" min-width="150" />
       <el-table-column prop="cron_expr" label="Cron表达式" width="180" />
       <el-table-column label="状态" width="100">
@@ -144,8 +175,8 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Refresh, Plus } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh, Plus, VideoPlay, VideoPause, Delete } from '@element-plus/icons-vue'
 import * as api from '@/api'
 import dayjs from 'dayjs'
 
@@ -159,6 +190,8 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const missedMap = ref({})
+const selectedTasks = ref([])
+const tableRef = ref(null)
 
 const allTasks = ref([])
 
@@ -341,6 +374,57 @@ function handleSizeChange(size) {
   currentPage.value = 1
 }
 
+function handleSelectionChange(selection) {
+  selectedTasks.value = selection
+}
+
+function clearSelection() {
+  if (tableRef.value) {
+    tableRef.value.clearSelection()
+  }
+  selectedTasks.value = []
+}
+
+function getSelectedTaskNames() {
+  return selectedTasks.value.map(t => t.name)
+}
+
+async function handleBatchEnable() {
+  if (selectedTasks.value.length === 0) return
+  try {
+    const result = await api.batchEnableTasks(getSelectedTaskNames())
+    ElMessage.success(`成功启用 ${result.success_count} 个任务${result.failed_count > 0 ? `,失败 ${result.failed_count} 个` : '')
+    clearSelection()
+    loadData()
+  } catch (err) {
+    ElMessage.error(err.message || '批量启用失败')
+  }
+}
+
+async function handleBatchDisable() {
+  if (selectedTasks.value.length === 0) return
+  try {
+    const result = await api.batchDisableTasks(getSelectedTaskNames())
+    ElMessage.success(`成功暂停 ${result.success_count} 个任务${result.failed_count > 0 ? `,失败 ${result.failed_count} 个` : '')
+    clearSelection()
+    loadData()
+  } catch (err) {
+    ElMessage.error(err.message || '批量暂停失败')
+  }
+}
+
+async function handleBatchDelete() {
+  if (selectedTasks.value.length === 0) return
+  try {
+    const result = await api.batchDeleteTasks(getSelectedTaskNames())
+    ElMessage.success(`成功删除 ${result.success_count} 个任务${result.failed_count > 0 ? `,失败 ${result.failed_count} 个` : '')
+    clearSelection()
+    loadData()
+  } catch (err) {
+    ElMessage.error(err.message || '批量删除失败')
+  }
+}
+
 onMounted(() => {
   loadData()
 })
@@ -356,6 +440,22 @@ onMounted(() => {
   gap: 12px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+}
+
+.batch-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.batch-info {
+  font-weight: 500;
+  color: #409eff;
 }
 
 .pagination {
